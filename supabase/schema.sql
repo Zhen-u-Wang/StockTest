@@ -79,6 +79,17 @@ create table if not exists stats (
   strong_hit_rate  double precision
 );
 
+-- 舊資料庫請執行：不重疊持有期與回測門檻欄位
+alter table stats add column if not exists n_periods integer;
+alter table stats add column if not exists period_hit_rate double precision;
+alter table stats add column if not exists period_net_excess double precision;
+alter table stats add column if not exists period_ci_lower double precision;
+alter table stats add column if not exists period_ci_upper double precision;
+alter table stats add column if not exists net_cost double precision;
+alter table stats add column if not exists backtest_passed boolean;
+alter table stats add column if not exists backtest_net_excess double precision;
+alter table stats add column if not exists backtest_net_excess_ex_best double precision;
+
 -- 前端用 anon key 只能讀，寫入只能用 service key（排程用）
 alter table predictions   enable row level security;
 alter table daily_snapshot enable row level security;
