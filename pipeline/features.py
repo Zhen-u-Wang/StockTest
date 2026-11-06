@@ -54,7 +54,7 @@ def _roll(g, col, n, fn="mean", min_periods=None):
 
 
 def price_features(price: pd.DataFrame) -> pd.DataFrame:
-    p = price[["date", "stock_id", "close", "Trading_Volume", "Trading_money"]].copy()
+    p = price[["date", "stock_id", "open", "close", "Trading_Volume", "Trading_money"]].copy()
     p = p[p["close"] > 0].sort_values(["stock_id", "date"]).reset_index(drop=True)
     g = p.groupby("stock_id")
 
@@ -160,8 +160,10 @@ def market_features(p: pd.DataFrame, index: pd.DataFrame) -> pd.DataFrame:
                .rename("close").reset_index())
         idx["source"] = "equal_weight"
     else:
-        idx = index[["date", "close"]].copy()
+        idx = index[["date", "close"] + (["open"] if "open" in index.columns else [])].copy()
         idx["source"] = C.INDEX_ID
+    if "open" not in idx.columns:
+        idx["open"] = np.nan
     idx = idx.sort_values("date").reset_index(drop=True)
     idx["idx_ret_1"] = idx["close"].pct_change(1)
     idx["idx_ret_5"] = idx["close"].pct_change(5)
@@ -170,7 +172,7 @@ def market_features(p: pd.DataFrame, index: pd.DataFrame) -> pd.DataFrame:
     idx["idx_ma60"] = idx["close"].rolling(C.MARKET_MA).mean()
     idx["idx_dist_ma60"] = idx["close"] / idx["idx_ma60"] - 1
     idx["market_on"] = (idx["close"] > idx["idx_ma60"]) & (idx["idx_ret_20"] > 0)
-    idx = idx.rename(columns={"close": "idx_close"})
+    idx = idx.rename(columns={"close": "idx_close", "open": "idx_open"})
     cols = ["date", "idx_close", "idx_ret_1", "idx_ret_5", "idx_ret_20",
             "idx_vol_20", "idx_ma60", "idx_dist_ma60", "market_on"]
     return p.merge(idx[cols], on="date", how="left"), idx
