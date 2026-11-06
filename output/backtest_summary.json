@@ -1,0 +1,12 @@
+{
+  "n_periods": 145,
+  "net_excess_per_period": -0.00789,
+  "ci_lower": -0.01151,
+  "period_hit_rate": 0.3517,
+  "best_year": 2022,
+  "net_excess_ex_best_year": -0.00802,
+  "positive_years": 0,
+  "n_years": 6,
+  "net_cost": 0.008,
+  "passed": false
+}

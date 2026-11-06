@@ -1,8 +1,8 @@
 {
-  "model_version": "lgb-v1",
-  "trained_at": "2026-11-06T06:51:36",
+  "model_version": "lgb-v2",
+  "trained_at": "2026-11-06T10:40:02",
   "trained_until": "2026-10-29",
-  "best_iteration": 135,
+  "best_iteration": 89,
   "features": [
     "ret_5_rk",
     "ret_20_rk",
