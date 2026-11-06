@@ -1,0 +1,7 @@
+# 行情歷史不進 git（GitHub Actions 用 cache，本機留在 data/）
+data/*.parquet
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/

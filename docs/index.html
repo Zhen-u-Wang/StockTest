@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股訊號看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.1/echarts.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --line: #e3e2dd;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984;
+    --series-1: #2a78d6; --series-2: #eb6834;
+    --up: #d03b3b; --up-soft: #ec835a; --flat: #8a8984; --good: #0ca30c; --warn: #fab219;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110; --surface: #1a1a19; --line: #2c2c2a;
+      --text: #f0efec; --text-2: #c3c2b7; --muted: #8a8984;
+      --series-1: #3987e5; --series-2: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --line: #2c2c2a;
+    --text: #f0efec; --text-2: #c3c2b7; --muted: #8a8984;
+    --series-1: #3987e5; --series-2: #d95926;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: "Noto Sans TC", system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: .02em; }
+  .sub { color: var(--text-2); font-size: 13px; }
+  .num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .banner { border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; border: 1px solid var(--line);
+            background: var(--surface); display: flex; gap: 12px; align-items: flex-start; }
+  .banner .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--warn); }
+  .banner.on .dot { background: var(--good); }
+  .banner b { font-weight: 700; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .k { font-size: 12px; color: var(--text-2); }
+  .tile .v { font-size: 22px; font-weight: 500; margin-top: 2px; }
+  .tile .s { font-size: 12px; color: var(--muted); }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+            padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  h2 > span { white-space: nowrap; }
+  h2 small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--text-2); font-weight: 500; font-size: 12px; }
+  th:first-child, td:first-child, th.l, td.l { text-align: left; }
+  tr:last-child td { border-bottom: 0; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500;
+           border: 1px solid currentColor; }
+  .b-strong { color: var(--up); }  .b-buy { color: var(--up-soft); }  .b-wait { color: var(--flat); }
+  .hit { color: var(--good); }  .miss { color: var(--up); }
+  .pos { color: var(--up); }  .neg { color: var(--good); }   /* 台股慣例：紅漲綠跌 */
+  .tbl-wrap { overflow-x: auto; }
+  #chart { width: 100%; height: 280px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+  .empty { color: var(--muted); padding: 12px 0; font-size: 14px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 24px; line-height: 1.6; }
+  details summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>台股訊號看板</h1>
+    <span class="sub" id="asof">載入中…</span>
+    <span class="sub" id="quoteTime"></span>
+  </header>
+
+  <div class="banner" id="gate"><span class="dot"></span><div id="gateText">讀取模型狀態…</div></div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <h2><span>今日建議</span> <small id="todayNote"></small></h2>
+    <div class="tbl-wrap"><table id="today"><thead><tr>
+      <th>#</th><th class="l">股票</th><th>分數</th><th>建議</th><th>預測日收盤</th><th>即時價</th><th>漲跌</th>
+    </tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <h2><span>權益曲線</span> <small>每週訊號等權、扣來回成本 0.6%，只在大盤濾網開啟時進場</small></h2>
+    <div class="legend"><span><i style="background:var(--series-1)"></i>策略</span><span><i style="background:var(--series-2)"></i>加權指數</span></div>
+    <div id="chart"></div>
+    <div class="empty" id="chartEmpty" hidden>尚未有結算完成的訊號，五個交易日後開始累積。</div>
+  </section>
+
+  <section>
+    <h2><span>歷史紀錄</span> <small>最近 60 筆已結算訊號</small></h2>
+    <div class="tbl-wrap"><table id="history"><thead><tr>
+      <th class="l">預測日</th><th class="l">股票</th><th>分數</th><th>建議</th><th>濾網</th><th>實際報酬</th><th>超額報酬</th><th>結果</th>
+    </tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section>
+    <details><summary>股票池全覽（前 30 名分數與主要特徵）</summary>
+    <div class="tbl-wrap"><table id="snapshot"><thead><tr>
+      <th>#</th><th class="l">股票</th><th>分數</th><th>5日報酬</th><th>20日報酬</th><th>距季線</th><th>量比</th><th>投信5日</th><th>投信連買</th><th>營收YoY</th>
+    </tr></thead><tbody></tbody></table></div></details>
+  </section>
+
+  <footer>
+    本站內容為程式依歷史資料自動產生之統計結果，不構成任何投資建議；模型命中率僅代表過去表現，不保證未來報酬。投資有風險，請自行判斷並承擔。
+  </footer>
+</div>
+
+<script>
+// ===== 設定 =====
+// 模式 A（零安裝，只用 GitHub）：什麼都不用改，頁面會讀同目錄的 data/*.json（由 GitHub Actions 產生）。
+// 模式 B（Supabase）：填入下面兩個值，頁面改讀 Supabase；再部署 Edge Function 就有即時報價。
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
+const QUOTE_FUNCTION = SUPABASE_URL ? SUPABASE_URL + "/functions/v1/fugle-quote" : "";
+const QUOTE_REFRESH_SEC = 15;
+const COST = 0.006;
+// ================
+
+const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+const sb = USE_SUPABASE ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const $ = (s) => document.querySelector(s);
+const pct = (v, d = 2) => v == null ? "–" : (v * 100).toFixed(d) + "%";
+const signedPct = (v) => v == null ? "–" : (v >= 0 ? "+" : "") + (v * 100).toFixed(2) + "%";
+const cls = (v) => v == null ? "" : v > 0 ? "pos" : v < 0 ? "neg" : "";
+const badge = (s) => {
+  const c = s?.startsWith("強烈") ? "b-strong" : s?.startsWith("買進") ? "b-buy" : "b-wait";
+  const icon = c === "b-wait" ? "–" : "▲";
+  return `<span class="badge ${c}">${icon} ${s ?? ""}</span>`;
+};
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+async function load() {
+  const d = USE_SUPABASE ? await loadSupabase() : await loadJson();
+  renderStatus(d.status, d.stats);
+  renderToday(d.preds);
+  renderHistory(d.hist);
+  renderSnapshot(d.snap);
+  renderCurve(d.equity);
+  startQuotes(d.preds.map((r) => r.stock_id));
+}
+
+// 模式 A：讀 GitHub Actions 產生的 JSON
+async function loadJson() {
+  const get = async (name) => {
+    const r = await fetch(`data/${name}.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(`讀不到 data/${name}.json（排程還沒跑過？）`);
+    return r.json();
+  };
+  const [st, preds, hist, equity, snap] = await Promise.all([
+    get("status"), get("predictions"), get("history"), get("equity"), get("snapshot")]);
+  return { status: st.status, stats: st.stats, preds, hist, equity, snap };
+}
+
+// 模式 B：讀 Supabase
+async function loadSupabase() {
+  const [status, stats, preds, hist, snap, all] = await Promise.all([
+    sb.from("market_status").select("*").order("date", { ascending: false }).limit(1),
+    sb.from("stats").select("*").eq("id", 1).maybeSingle(),
+    sb.from("predictions").select("*").order("pred_date", { ascending: false }).limit(10),
+    sb.from("predictions").select("*").not("resolved_date", "is", null).order("resolved_date", { ascending: false }).limit(60),
+    sb.from("daily_snapshot").select("*").order("pred_date", { ascending: false }).limit(30),
+    sb.from("predictions").select("pred_date,actual_return,index_return,raw_signal,market_on")
+      .not("resolved_date", "is", null).order("pred_date", { ascending: true }).limit(5000),
+  ]);
+  for (const r of [status, stats, preds, hist, snap, all]) if (r.error) throw r.error;
+  return { status: status.data?.[0], stats: stats.data, preds: preds.data ?? [], hist: hist.data ?? [],
+           snap: snap.data ?? [], equity: equityFromRows(all.data ?? []) };
+}
+
+// 由已結算訊號合成權益曲線：每個預測日等權、扣成本、只在濾網開時進場
+function equityFromRows(rows) {
+  const byDate = new Map();
+  for (const r of rows) {
+    if (!byDate.has(r.pred_date)) byDate.set(r.pred_date, { rets: [], idx: r.index_return });
+    if (r.market_on && r.raw_signal !== "觀望") byDate.get(r.pred_date).rets.push(r.actual_return);
+  }
+  const out = []; let s = 1, b = 1;
+  for (const [date, v] of [...byDate.entries()].sort()) {
+    const r = v.rets.length ? v.rets.reduce((a, c) => a + c, 0) / v.rets.length - COST : 0;
+    s *= 1 + r; b *= 1 + (v.idx ?? 0);
+    out.push({ date, strategy: s - 1, benchmark: b - 1 });
+  }
+  return out;
+}
+
+function renderStatus(st, s) {
+  $("#asof").textContent = st ? `資料日期 ${st.date} · 模型 ${st.model_version ?? ""}` : "尚無資料";
+  const g = $("#gate");
+  if (!s || !s.n) {
+    $("#gateText").innerHTML = `<b>觀察期</b> — 尚未累積到可評估的結算筆數（需 ${s?.gate_min_n ?? 30} 筆實際出手訊號）。目前請把建議當作觀察清單，不要據此交易。`;
+  } else if (s.enabled) {
+    g.classList.add("on");
+    $("#gateText").innerHTML = `<b>模型已通過觀察期</b> — ${s.n} 筆結算，命中率 ${pct(s.hit_rate, 1)}，95% 信賴下界 ${pct(s.ci_lower, 1)} ≥ 門檻 ${pct(s.gate_hit_lower, 0)}。`;
+  } else {
+    $("#gateText").innerHTML = `<b>觀察期</b> — ${s.n}/${s.gate_min_n} 筆結算，命中率 ${pct(s.hit_rate, 1)}（95% 區間 ${pct(s.ci_lower, 1)} ~ ${pct(s.ci_upper, 1)}）。信賴下界需 ≥ ${pct(s.gate_hit_lower, 0)} 才啟用。`;
+  }
+  const tiles = [
+    ["大盤濾網", st ? (st.market_on ? "開" : "關") : "–",
+     st ? `指數 ${st.idx_close?.toFixed(0)} / 季線 ${st.idx_ma60?.toFixed(0)} · 20日 ${signedPct(st.idx_ret_20)}` : ""],
+    ["已結算（實際出手）", s?.n ?? 0, `另有 ${s?.n_pending ?? 0} 筆未到期`],
+    ["命中率（跑贏大盤）", s?.hit_rate != null ? pct(s.hit_rate, 1) : "–", `扣成本後獲利 ${pct(s?.hit_rate_abs, 1)}`],
+    ["近 20 筆命中率", s?.hit_rate_last20 != null ? pct(s.hit_rate_last20, 1) : "–", ""],
+    ["95% 信賴區間", s?.ci_lower != null ? `${pct(s.ci_lower, 0)}–${pct(s.ci_upper, 0)}` : "–", "命中率的貝氏區間"],
+    ["平均超額報酬", s?.avg_excess != null ? signedPct(s.avg_excess) : "–", `平均絕對報酬 ${signedPct(s?.avg_return)}`],
+  ];
+  $("#tiles").innerHTML = tiles.map(([k, v, sub]) =>
+    `<div class="tile"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${sub}</div></div>`).join("");
+}
+
+function renderToday(rows) {
+  const tb = $("#today tbody");
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">尚無預測</td></tr>`; return; }
+  const d = rows[0].pred_date;
+  const same = rows.filter((r) => r.pred_date === d).sort((a, b) => a.rank - b.rank);
+  $("#todayNote").textContent = `預測日 ${d} · 持有 5 個交易日`;
+  tb.innerHTML = same.map((r) => `<tr data-sid="${r.stock_id}">
+    <td class="num">${r.rank}</td>
+    <td class="l"><b>${r.stock_id}</b> ${r.stock_name ?? ""}</td>
+    <td class="num">${r.score?.toFixed(3)}</td>
+    <td>${badge(r.signal)}</td>
+    <td class="num">${r.close_at_pred?.toFixed(2)}</td>
+    <td class="num q-price">–</td>
+    <td class="num q-chg">–</td></tr>`).join("");
+}
+
+function renderHistory(rows) {
+  const tb = $("#history tbody");
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">尚無已結算訊號</td></tr>`; return; }
+  tb.innerHTML = rows.map((r) => `<tr>
+    <td class="l num">${r.pred_date}</td>
+    <td class="l">${r.stock_id} ${r.stock_name ?? ""}</td>
+    <td class="num">${r.score?.toFixed(3)}</td>
+    <td>${badge(r.raw_signal)}</td>
+    <td>${r.market_on ? "開" : "關"}</td>
+    <td class="num ${cls(r.actual_return)}">${signedPct(r.actual_return)}</td>
+    <td class="num ${cls(r.excess_return)}">${signedPct(r.excess_return)}</td>
+    <td class="${r.hit == null ? "" : r.hit ? "hit" : "miss"}">${r.hit == null ? "待結算" : r.hit ? "✓ 命中" : "✗ 未中"}</td></tr>`).join("");
+}
+
+function renderSnapshot(rows) {
+  const tb = $("#snapshot tbody");
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="10" class="empty">尚無資料</td></tr>`; return; }
+  const d = rows[0].pred_date;
+  tb.innerHTML = rows.filter((r) => r.pred_date === d).sort((a, b) => a.rank - b.rank).map((r) => `<tr>
+    <td class="num">${r.rank}</td>
+    <td class="l">${r.stock_id} ${r.stock_name ?? ""}</td>
+    <td class="num">${r.score?.toFixed(3)}</td>
+    <td class="num ${cls(r.ret_5)}">${signedPct(r.ret_5)}</td>
+    <td class="num ${cls(r.ret_20)}">${signedPct(r.ret_20)}</td>
+    <td class="num ${cls(r.dist_ma60)}">${signedPct(r.dist_ma60)}</td>
+    <td class="num">${r.vol_ratio?.toFixed(2) ?? "–"}</td>
+    <td class="num ${cls(r.trust_5)}">${r.trust_5 == null ? "–" : (r.trust_5 * 100).toFixed(1) + "%"}</td>
+    <td class="num">${r.trust_streak ?? "–"} 日</td>
+    <td class="num ${cls(r.rev_yoy)}">${signedPct(r.rev_yoy)}</td></tr>`).join("");
+}
+
+function renderCurve(points) {
+  if (!points || points.length < 2) {
+    $("#chartEmpty").textContent = points?.length ? "已有 1 個結算日，再累積一週就會畫出曲線。" : "尚未有結算完成的訊號，五個交易日後開始累積。";
+    $("#chartEmpty").hidden = false; $("#chart").hidden = true; return;
+  }
+  const dates = points.map((p) => p.date);
+  const strat = points.map((p) => +(p.strategy * 100).toFixed(2));
+  const bench = points.map((p) => +(p.benchmark * 100).toFixed(2));
+  const chart = echarts.init($("#chart"), null, { renderer: "svg" });
+  const text = css("--text-2"), line = css("--line");
+  chart.setOption({
+    animation: false,
+    grid: { left: 44, right: 16, top: 12, bottom: 28 },
+    tooltip: { trigger: "axis", valueFormatter: (v) => v + "%" },
+    xAxis: { type: "category", data: dates, axisLine: { lineStyle: { color: line } }, axisLabel: { color: text, fontSize: 11 }, axisTick: { show: false } },
+    yAxis: { type: "value", axisLabel: { color: text, fontSize: 11, formatter: "{value}%" }, splitLine: { lineStyle: { color: line } } },
+    series: [
+      { name: "策略", type: "line", data: strat, showSymbol: false, lineStyle: { width: 2, color: css("--series-1") }, itemStyle: { color: css("--series-1") } },
+      { name: "加權指數", type: "line", data: bench, showSymbol: false, lineStyle: { width: 2, color: css("--series-2") }, itemStyle: { color: css("--series-2") } },
+    ],
+  });
+  window.addEventListener("resize", () => chart.resize());
+}
+
+async function startQuotes(symbols) {
+  if (!symbols.length || !QUOTE_FUNCTION) return;
+  const tick = async () => {
+    try {
+      const res = await fetch(`${QUOTE_FUNCTION}?symbols=${symbols.join(",")}`);
+      if (!res.ok) return;
+      const { quotes, fetchedAt } = await res.json();
+      for (const q of quotes) {
+        const tr = document.querySelector(`#today tr[data-sid="${q.symbol}"]`);
+        if (!tr || q.error || q.price == null) continue;
+        tr.querySelector(".q-price").textContent = q.price.toFixed(2);
+        const c = tr.querySelector(".q-chg");
+        c.textContent = signedPct((q.changePercent ?? 0) / 100);
+        c.className = "num q-chg " + cls(q.changePercent);
+      }
+      $("#quoteTime").textContent = `即時報價 ${new Date(fetchedAt).toLocaleTimeString("zh-TW", { hour12: false })}`;
+    } catch (e) { /* 中繼未部署或暫時失敗，略過 */ }
+  };
+  tick();
+  setInterval(tick, QUOTE_REFRESH_SEC * 1000);
+}
+
+load().catch((e) => { $("#asof").textContent = "讀取失敗：" + (e.message ?? e); console.error(e); });
+</script>
+</body>
+</html>
