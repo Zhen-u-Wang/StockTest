@@ -18,7 +18,7 @@ import pandas as pd
 
 from . import config as C
 from .predict import LOG_FILE, STATS_FILE
-from .score import BUY_SET
+from .score import BUY_SET, independent_periods, _price_index
 
 DOCS_DATA = C.ROOT / "docs" / "data"
 
@@ -52,13 +52,16 @@ def equity_from_log(log: pd.DataFrame) -> list[dict]:
         return []
     done["market_on"] = done["market_on"].astype(str).str.lower().eq("true")
     act = done[done["raw_signal"].isin(BUY_SET) & done["market_on"]]
-    per = (act.groupby("pred_date")["actual_return"].mean() - C.COST).rename("strategy")
-    bench = done.groupby("pred_date")["index_return"].first().rename("benchmark")
-    df = pd.concat([per, bench], axis=1).sort_index().fillna({"strategy": 0.0, "benchmark": 0.0})
-    df["strategy"] = (1 + df["strategy"]).cumprod() - 1
-    df["benchmark"] = (1 + df["benchmark"]).cumprod() - 1
-    return [dict(date=str(d), strategy=round(float(r.strategy), 5), benchmark=round(float(r.benchmark), 5))
-            for d, r in df.iterrows()]
+    # 只用不重疊持有期複利；每天都有的 5 日報酬直接連乘會重複計算
+    _, idx = _price_index()
+    per = independent_periods(act, idx["date"])
+    if per.empty:
+        return []
+    per = per.sort_values("pred_date")
+    strategy = (1 + per["net_ret"].astype(float)).cumprod() - 1
+    benchmark = (1 + per["index_ret"].astype(float)).cumprod() - 1
+    return [dict(date=str(d), strategy=round(float(s), 5), benchmark=round(float(b), 5))
+            for d, s, b in zip(per["pred_date"], strategy, benchmark)]
 
 
 def main():
