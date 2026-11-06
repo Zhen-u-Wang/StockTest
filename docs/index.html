@@ -199,22 +199,21 @@ function equityFromRows(rows) {
 function renderStatus(st, s) {
   $("#asof").textContent = st ? `資料日期 ${st.date} · 模型 ${st.model_version ?? ""}` : "尚無資料";
   const g = $("#gate");
-  if (!s || !s.n) {
-    $("#gateText").innerHTML = `<b>觀察期</b> — 尚未累積到可評估的結算筆數（需 ${s?.gate_min_n ?? 30} 筆實際出手訊號）。目前請把建議當作觀察清單，不要據此交易。`;
-  } else if (s.enabled) {
+  if (s?.enabled) {
     g.classList.add("on");
-    $("#gateText").innerHTML = `<b>模型已通過觀察期</b> — ${s.n} 筆結算，命中率 ${pct(s.hit_rate, 1)}，95% 信賴下界 ${pct(s.ci_lower, 1)} ≥ 門檻 ${pct(s.gate_hit_lower, 0)}。`;
+    $("#gateText").innerHTML = `<b>模型已通過觀察期</b> — ${s.n_periods} 個不重疊持有期，每期扣成本後超額 ${signedPct(s.period_net_excess)}，95% 信賴下界 ${signedPct(s.period_ci_lower)} &gt; 0。歷史表現不保證未來報酬。`;
   } else {
-    $("#gateText").innerHTML = `<b>觀察期</b> — ${s.n}/${s.gate_min_n} 筆結算，命中率 ${pct(s.hit_rate, 1)}（95% 區間 ${pct(s.ci_lower, 1)} ~ ${pct(s.ci_upper, 1)}）。信賴下界需 ≥ ${pct(s.gate_hit_lower, 0)} 才啟用。`;
+    const bt = s?.backtest_passed ? "回測已通過" : "回測未通過";
+    $("#gateText").innerHTML = `<b>觀察期</b> — ${bt}；不重疊持有期 ${s?.n_periods ?? 0}/${s?.gate_min_n ?? 30}。需要回測通過、期數足夠，且每期扣成本後超額報酬的 95% 信賴下界 &gt; 0。目前請把建議當作觀察清單，不要據此交易。`;
   }
   const tiles = [
     ["大盤濾網", st ? (st.market_on ? "開" : "關") : "–",
      st ? `指數 ${st.idx_close?.toFixed(0)} / 季線 ${st.idx_ma60?.toFixed(0)} · 20日 ${signedPct(st.idx_ret_20)}` : ""],
-    ["已結算（實際出手）", s?.n ?? 0, `另有 ${s?.n_pending ?? 0} 筆未到期`],
-    ["命中率（跑贏大盤）", s?.hit_rate != null ? pct(s.hit_rate, 1) : "–", `扣成本後獲利 ${pct(s?.hit_rate_abs, 1)}`],
-    ["近 20 筆命中率", s?.hit_rate_last20 != null ? pct(s.hit_rate_last20, 1) : "–", ""],
-    ["95% 信賴區間", s?.ci_lower != null ? `${pct(s.ci_lower, 0)}–${pct(s.ci_upper, 0)}` : "–", "命中率的貝氏區間"],
-    ["平均超額報酬", s?.avg_excess != null ? signedPct(s.avg_excess) : "–", `平均絕對報酬 ${signedPct(s?.avg_return)}`],
+    ["不重疊持有期", `${s?.n_periods ?? 0}/${s?.gate_min_n ?? 30}`, `實際出手 ${s?.n ?? 0} 筆 · 另有 ${s?.n_pending ?? 0} 筆未到期`],
+    ["每期扣成本超額", s?.period_net_excess != null ? signedPct(s.period_net_excess) : "–", `已扣成本與滑價 ${pct(s?.net_cost, 1)}`],
+    ["95% 信賴區間", s?.period_ci_lower != null ? `${signedPct(s.period_ci_lower)} ~ ${signedPct(s.period_ci_upper)}` : "–", "下界需大於 0"],
+    ["持有期勝率", s?.period_hit_rate != null ? pct(s.period_hit_rate, 1) : "–", `單筆跑贏大盤 ${s?.hit_rate != null ? pct(s.hit_rate, 1) : "–"}`],
+    ["回測門檻", s?.backtest_passed ? "通過" : "未通過", `每期超額 ${signedPct(s?.backtest_net_excess)} · 去掉最佳年 ${signedPct(s?.backtest_net_excess_ex_best)}`],
   ];
   $("#tiles").innerHTML = tiles.map(([k, v, sub]) =>
     `<div class="tile"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${sub}</div></div>`).join("");
