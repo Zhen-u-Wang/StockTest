@@ -1,7 +1,7 @@
 {
   "id": 1,
-  "updated_at": "2026-11-06T16:53:51",
-  "n_pending": 21,
+  "updated_at": "2026-11-09T21:00:57",
+  "n_pending": 31,
   "enabled": false,
   "gate_min_n": 30,
   "n_periods": 0,
