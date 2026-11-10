@@ -1,2 +1,2 @@
 date,idx_close,idx_ma60,idx_ret_20,market_on,gate_enabled,n_signals,model_version,updated_at
-2026-11-09,41661.7,46360.77450000001,-0.16352667339539106,False,False,10,lgb-v2,2026-11-09T21:00:56
+2026-11-10,42711.92,46320.62783333333,-0.1338685761934273,False,False,10,lgb-v2,2026-11-10T18:15:53
