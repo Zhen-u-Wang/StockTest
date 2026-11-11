@@ -1,6 +1,7 @@
 """
 產生與 FinMind 欄位相同的合成資料，用來離線測試 pipeline（不需要網路）。
 會刻意讓「投信連買」與未來報酬有微弱正相關，讓模型有東西可學。
+每檔每年 7 月放一次除息（原始價在除息日掉一段），並產生對應的除權息結果表，用來測試還原股價。
 
 用法：python scripts/make_synthetic.py [--end 2026-11-05] [--n 60]
 """
@@ -28,7 +29,7 @@ def main(end: str, n_stocks: int, seed: int = 7):
                   "Trading_Volume": 0, "Trading_money": 0, "spread": 0,
                   "Trading_turnover": 0}).to_parquet(DATA / "index.parquet", index=False)
 
-    price, inst, margin, rev = [], [], [], []
+    price, inst, margin, rev, div = [], [], [], [], []
     for sid in uni["stock_id"]:
         beta = rng.uniform(0.6, 1.4)
         # 投信淨買超（股），有自相關
@@ -40,6 +41,20 @@ def main(end: str, n_stocks: int, seed: int = 7):
         signal[5:] = 0.0015 * np.clip(trust[:-5], -3, 3)  # 5 天後才反映
         r = beta * mkt + rng.normal(0, 0.018, T) + signal
         close = 100 * rng.uniform(0.3, 5) * np.cumprod(1 + r)
+        # 除息：close 是「還原後」的真實走勢；原始價 = 還原價 / 之後所有除息係數的連乘
+        ex_pos = [int(np.searchsorted(dates, pd.Timestamp(year=y, month=7, day=int(rng.integers(5, 25)))))
+                  for y in sorted(set(dates.year))]
+        ex_pos = [k for k in ex_pos if 0 < k < T]
+        fac = np.ones(T)
+        for k in ex_pos:
+            f = 1 - rng.uniform(0.02, 0.06)
+            fac[:k] *= f
+            div.append((dates[k], sid, f, k))
+        close = close / fac
+        for j in range(len(div) - len(ex_pos), len(div)):
+            d, s_, f, k = div[j]
+            div[j] = dict(date=d, stock_id=s_, before_price=close[k - 1],
+                          reference_price=close[k - 1] * f, stock_or_cache_dividend="息")
         vol = (rng.lognormal(14, 0.5, T)).astype(int)
         price.append(pd.DataFrame({
             "date": dates, "stock_id": sid, "Trading_Volume": vol,
@@ -70,6 +85,7 @@ def main(end: str, n_stocks: int, seed: int = 7):
     pd.concat(inst).to_parquet(DATA / "inst.parquet", index=False)
     pd.concat(margin).to_parquet(DATA / "margin.parquet", index=False)
     pd.concat(rev).to_parquet(DATA / "revenue.parquet", index=False)
+    pd.DataFrame(div).to_parquet(DATA / "dividend.parquet", index=False)
     print(f"合成資料：{n_stocks} 檔 × {T} 天，至 {end}")
 
 
