@@ -1,0 +1,86 @@
+name: daily-signal
+
+# 零安裝模式：只要這個 workflow 跑過一次，docs/ 就會有模型結果，GitHub Pages 直接顯示。
+# Supabase 是選用：有設 SUPABASE_URL / SUPABASE_SERVICE_KEY 才會同步過去。
+
+on:
+  schedule:
+    # 週一到週五 台北 17:30（UTC 09:30）：等法人與融資券資料公布完
+    - cron: "30 9 * * 1-5"
+    # 每月 1 日 台北 18:00 重新訓練
+    - cron: "0 10 1 * *"
+  workflow_dispatch:
+    inputs:
+      retrain:
+        description: "重新訓練模型（第一次執行請勾選）"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-signal
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 行情歷史放 Actions cache，每天只增量抓；cache 失效就全量重抓
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: market-data-${{ github.run_id }}
+          restore-keys: market-data-
+
+      - name: 抓資料
+        run: python -m pipeline.fetch
+
+      # 程式裡的模型版本（config.MODEL_VERSION）跟已存模型不同，代表特徵或訓練方式改過，要重訓
+      - name: 檢查模型版本
+        id: ver
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          from pipeline import config as C
+          p = C.MODEL_DIR / "meta.json"
+          saved = json.loads(p.read_text()).get("model_version") if p.exists() else None
+          print("stale=" + str(saved != C.MODEL_VERSION).lower())
+          EOF
+
+      - name: 訓練模型（手動勾選 retrain、每月 1 日、尚無模型、或模型版本過期時）
+        if: ${{ inputs.retrain || github.event.schedule == '0 10 1 * *' || hashFiles('models/model_latest.txt') == '' || steps.ver.outputs.stale == 'true' }}
+        run: python -m pipeline.train
+
+      - name: 產生建議
+        run: python -m pipeline.predict
+
+      - name: 回填結果與統計
+        run: python -m pipeline.score
+
+      - name: 匯出前端 JSON
+        run: python -m pipeline.export_json
+
+      # 預測日誌、模型、前端資料 commit 回 repo：git 歷史就是不可竄改的觀察紀錄
+      - name: Commit 結果
+        run: |
+          git config user.name "signal-bot"
+          git config user.email "signal-bot@users.noreply.github.com"
+          git add -A output docs/data models
+          git diff --cached --quiet || git commit -m "signal: $(TZ=Asia/Taipei date +%Y-%m-%d)"
+          git push
