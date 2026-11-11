@@ -41,7 +41,9 @@ def gate_enabled() -> bool:
 
 def make_signals(latest: pd.DataFrame, model: lgb.Booster, meta: dict) -> pd.DataFrame:
     df = latest.copy()
-    df["score"] = model.predict(df[FEATURE_COLS], num_iteration=meta.get("best_iteration"))
+    # 用模型訓練時的特徵清單，程式的特徵清單改了但模型還沒重訓時也不會錯位
+    cols = meta.get("features") or FEATURE_COLS
+    df["score"] = model.predict(df[cols], num_iteration=meta.get("best_iteration"))
     df = df.sort_values("score", ascending=False).reset_index(drop=True)
     df["rank"] = np.arange(1, len(df) + 1)
     df["raw_signal"] = np.where(df["score"] >= C.SCORE_STRONG, "強烈買進",
@@ -73,6 +75,8 @@ def main():
     latest = feat[feat["date"] == last_date].dropna(subset=FEATURE_COLS, how="all")
     df = make_signals(latest, model, meta)
     df["pred_date"] = last_date.date().isoformat()
+    if "close_raw" in df.columns:
+        df["close"] = df["close_raw"]  # 看板與日誌顯示原始收盤價，不顯示還原價
     df["close_at_pred"] = df["close"]
     df["model_version"] = meta.get("model_version", C.MODEL_VERSION)
     enabled = gate_enabled()

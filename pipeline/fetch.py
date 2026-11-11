@@ -1,5 +1,5 @@
 """
-從 FinMind 抓取行情、三大法人、融資券、月營收、加權指數，存成 parquet。
+從 FinMind 抓取行情、三大法人、融資券、月營收、除權息結果、加權指數，存成 parquet。
 支援增量更新：已有資料的股票只抓最後一天之後的部分。
 
 用法：
@@ -20,6 +20,8 @@ DATASETS = {
     "inst":    ("taiwan_stock_institutional_investors", "inst.parquet"),
     "margin":  ("taiwan_stock_margin_purchase_short_sale", "margin.parquet"),
     "revenue": ("taiwan_stock_month_revenue", "revenue.parquet"),
+    # 除權除息結果表：用來還原股價（見 adjust.py）。放最後，配額不夠時先保住其他資料
+    "dividend": ("taiwan_stock_dividend_result", "dividend.parquet"),
 }
 
 
@@ -75,6 +77,9 @@ def _call(api, method, stock_id, start, end, retries=3):
 def fetch_dataset(api, name, universe, full=False):
     method, fname = DATASETS[name]
     path = C.DATA_DIR / fname
+    if not hasattr(api, method):
+        print(f"[{name}] 這個版本的 FinMind 沒有 {method}，略過")
+        return
     old = pd.DataFrame() if full else _load(path)
     today = dt.date.today().isoformat()
     last_by_stock = {}

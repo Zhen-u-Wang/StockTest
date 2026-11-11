@@ -2,6 +2,8 @@
 標籤：隔日開盤買進、持有到第 HORIZON 個交易日收盤的報酬，減去大盤同期報酬 = 超額報酬。
 訊號在收盤後才產生，所以不能用當日收盤價當進場價。
 同一天跨股票排名，前 LABEL_TOP 標 1、後 LABEL_BOTTOM 標 0、中間捨棄（NaN）。
+另外算 excess_ew = 個股報酬 − 股票池等權平均報酬，用來看「純選股」有沒有用
+（加權指數受少數權值股影響很大，跟一籃子等權持股比並不對等）。
 """
 import numpy as np
 import pandas as pd
@@ -23,6 +25,8 @@ def add_labels(feat: pd.DataFrame, idx: pd.DataFrame) -> pd.DataFrame:
     p = p.merge(i[["date", "idx_fwd"]], on="date", how="left")
 
     p["excess"] = p["fwd_ret"] - p["idx_fwd"]
+    p["univ_fwd"] = p.groupby("date")["fwd_ret"].transform("mean")
+    p["excess_ew"] = p["fwd_ret"] - p["univ_fwd"]
     pct = p.groupby("date")["excess"].rank(pct=True)
     p["label"] = np.where(pct >= 1 - C.LABEL_TOP, 1.0,
                  np.where(pct <= C.LABEL_BOTTOM, 0.0, np.nan))

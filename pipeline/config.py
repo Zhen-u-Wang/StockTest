@@ -31,7 +31,8 @@ NET_COST = COST + SLIPPAGE  # 回測與績效統一扣這個數字
 
 # ---- 訓練 ----
 FIRST_TEST_YEAR = int(os.getenv("FIRST_TEST_YEAR", "2021"))
-SAMPLE_EVERY = HORIZON  # 每 N 個交易日取一個樣本，避免標籤重疊
+SAMPLE_EVERY = HORIZON  # 回測「測試」每 N 個交易日取一個決策日，持有期才不重疊
+TRAIN_EVERY = int(os.getenv("TRAIN_EVERY", "1"))  # 「訓練」每幾個交易日取樣一次；1 = 每天都用（切分時仍以 exit_date 隔離）
 LGB_PARAMS = dict(
     objective="binary",
     learning_rate=0.03,
@@ -61,4 +62,4 @@ GATE_MIN_N = 30        # 至少累積幾個「不重疊持有期」才評估（�
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
-MODEL_VERSION = os.getenv("MODEL_VERSION", "lgb-v2")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "lgb-v3")

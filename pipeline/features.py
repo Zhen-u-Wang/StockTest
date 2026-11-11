@@ -2,7 +2,9 @@
 特徵工程：
 1. 每檔股票算動能、波動、量能、籌碼、營收特徵
 2. 同一天跨股票做百分位標準化（0~1）
-3. 加上大盤環境特徵（不做標準化）
+3. 另外算大盤環境（只給大盤濾網與看板用，不進模型）
+
+股價先用除權息結果表還原（adjust.py），報酬才不會被除息缺口污染。
 
 所有特徵只用「當天收盤後已公布」的資料：
 - 法人買賣超、融資券：當日盤後公布，可用
@@ -12,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from . import config as C
+from .adjust import adjust_prices
 
 # 會做跨股票百分位標準化的特徵
 STOCK_FEATURES = [
@@ -24,9 +27,10 @@ STOCK_FEATURES = [
     "margin_chg_5", "short_chg_5",
     "rev_yoy", "rev_mom",
 ]
-# 大盤環境特徵（所有股票同一天相同，不做標準化）
+# 大盤環境（所有股票同一天相同）。標籤是「同一天跨股票排名」，大盤數值本身分不出個股高下，
+# 放進模型只會讓樹去記特定時期的雜訊，所以不當特徵，只留給大盤濾網與看板。
 MARKET_FEATURES = ["idx_ret_5", "idx_ret_20", "idx_vol_20", "idx_dist_ma60"]
-FEATURE_COLS = [f + "_rk" for f in STOCK_FEATURES] + MARKET_FEATURES
+FEATURE_COLS = [f + "_rk" for f in STOCK_FEATURES]
 
 
 def _load(name):
@@ -54,7 +58,9 @@ def _roll(g, col, n, fn="mean", min_periods=None):
 
 
 def price_features(price: pd.DataFrame) -> pd.DataFrame:
-    p = price[["date", "stock_id", "open", "close", "Trading_Volume", "Trading_money"]].copy()
+    keep = ["date", "stock_id", "open", "close", "Trading_Volume", "Trading_money"]
+    keep += [c for c in ("close_raw", "adj_factor") if c in price.columns]
+    p = price[keep].copy()
     p = p[p["close"] > 0].sort_values(["stock_id", "date"]).reset_index(drop=True)
     g = p.groupby("stock_id")
 
@@ -186,12 +192,13 @@ def rank_cross_section(p: pd.DataFrame) -> pd.DataFrame:
 
 
 def build(save=True):
-    price, inst, margin, revenue, index = (_load(n) for n in
-                                           ("price", "inst", "margin", "revenue", "index"))
+    price, inst, margin, revenue, index, dividend = (
+        _load(n) for n in ("price", "inst", "margin", "revenue", "index", "dividend"))
     if price.empty:
         raise SystemExit("沒有行情資料，請先執行 python -m pipeline.fetch")
     universe = pd.read_csv(C.UNIVERSE_FILE, dtype=str)
     price = price[price["stock_id"].isin(universe["stock_id"])]
+    price = adjust_prices(price, dividend)
 
     p = price_features(price)
     p = inst_features(p, inst)

@@ -2,9 +2,10 @@
 Walk-forward 訓練與回測。
 
 每年為一個測試期：只用「標籤在該年第一個決策日前已結算」的資料訓練
-（最後 15% 時間當 early-stopping 驗證，同樣做隔離），在該年測試。
-測試時每 HORIZON 個交易日取一個決策日，避免標籤重疊。
-進場價為隔日開盤；股票池固定，倖存者偏差尚未修正。
+在該年測試。訓練分兩步：先拿最後 15% 時間當 early-stopping 驗證（同樣做隔離）決定樹的棵數，
+再用「全部」訓練資料以那個棵數重訓，最近的資料才不會只被拿來驗證而沒學到。
+訓練用每個交易日的樣本（TRAIN_EVERY）；測試每 HORIZON 個交易日取一個決策日，持有期不重疊。
+進場價為隔日開盤（還原股價）；股票池固定，倖存者偏差尚未修正。
 
 輸出：
 - output/backtest_report.csv / .md   每年績效
@@ -30,21 +31,25 @@ def sample_dates(dates: pd.Series) -> np.ndarray:
     return d[:: C.SAMPLE_EVERY]
 
 
-def fit(train_df: pd.DataFrame) -> lgb.Booster:
+def fit(train_df: pd.DataFrame) -> tuple[lgb.Booster, int]:
+    """回傳（模型, 棵數）。先用最後 15% 時間決定棵數，再用全部資料重訓。"""
     dates = np.sort(train_df["date"].unique())
     cut = dates[int(len(dates) * 0.85)]
     tr = train_df[train_df["exit_date"] < cut]
     va = train_df[train_df["date"] >= cut]
     dtr = lgb.Dataset(tr[FEATURE_COLS], tr["label"])
     dva = lgb.Dataset(va[FEATURE_COLS], va["label"], reference=dtr)
-    return lgb.train(C.LGB_PARAMS, dtr, C.LGB_ROUNDS, valid_sets=[dva],
-                     callbacks=[lgb.early_stopping(50, verbose=False)])
+    probe = lgb.train(C.LGB_PARAMS, dtr, C.LGB_ROUNDS, valid_sets=[dva],
+                      callbacks=[lgb.early_stopping(50, verbose=False)])
+    rounds = max(int(probe.best_iteration or C.LGB_ROUNDS), 1)
+    full = lgb.Dataset(train_df[FEATURE_COLS], train_df["label"])
+    return lgb.train(C.LGB_PARAMS, full, rounds), rounds
 
 
-def evaluate(model: lgb.Booster, test: pd.DataFrame) -> tuple[dict, pd.DataFrame]:
+def evaluate(model: lgb.Booster, rounds: int, test: pd.DataFrame) -> tuple[dict, pd.DataFrame]:
     """test: 測試期、已抽樣日期、excess 不為 NaN 的所有列（含未標籤的中間 40%）。"""
     t = test.copy()
-    t["score"] = model.predict(t[FEATURE_COLS], num_iteration=model.best_iteration)
+    t["score"] = model.predict(t[FEATURE_COLS])
     lab = t[t["label"].notna()]
     auc = roc_auc_score(lab["label"], lab["score"]) if lab["label"].nunique() == 2 else np.nan
 
@@ -57,11 +62,13 @@ def evaluate(model: lgb.Booster, test: pd.DataFrame) -> tuple[dict, pd.DataFrame
     # 週期報酬：有訊號且大盤濾網開才進場，等權，扣來回成本
     per = (act.groupby("date")["fwd_ret"].mean() - C.NET_COST).rename("strategy")
     net_excess = (act.groupby("date")["excess"].mean() - C.NET_COST).rename("net_excess")
+    net_excess_ew = (act.groupby("date")["excess_ew"].mean() - C.NET_COST).rename("net_excess_ew")
     dates = pd.Index(np.sort(t["date"].unique()), name="date")
     curve = pd.DataFrame(index=dates)
     curve["strategy"] = per.reindex(dates).fillna(0.0)
     curve["benchmark"] = t.groupby("date")["idx_fwd"].first().reindex(dates).fillna(0.0)
     curve["net_excess"] = net_excess.reindex(dates)  # 沒出手的期為 NaN
+    curve["net_excess_ew"] = net_excess_ew.reindex(dates)  # 同上，但基準換成股票池等權平均
     curve["n_signals"] = act.groupby("date").size().reindex(dates).fillna(0).astype(int)
 
     m = dict(
@@ -69,6 +76,7 @@ def evaluate(model: lgb.Booster, test: pd.DataFrame) -> tuple[dict, pd.DataFrame
         auc=round(float(auc), 4) if pd.notna(auc) else None,
         prec_top10=round(float((top["excess"] > 0).mean()), 4),
         avg_excess_top10=round(float(top["excess"].mean()), 4),
+        avg_excess_ew_top10=round(float(top["excess_ew"].mean()), 4),
         n_signals=int(len(sig)),
         prec_signal=round(float((sig["excess"] > 0).mean()), 4) if len(sig) else None,
         avg_ret_signal_net=round(float((sig["fwd_ret"] - C.NET_COST).mean()), 4) if len(sig) else None,
@@ -78,9 +86,10 @@ def evaluate(model: lgb.Booster, test: pd.DataFrame) -> tuple[dict, pd.DataFrame
         prec_acted=round(float((act["excess"] > 0).mean()), 4) if len(act) else None,
         n_periods=int(net_excess.notna().sum()),
         net_excess_per_period=round(float(net_excess.mean()), 5) if len(net_excess) else None,
+        net_excess_ew_per_period=round(float(net_excess_ew.mean()), 5) if len(net_excess_ew) else None,
         strategy_return=round(float((1 + curve["strategy"]).prod() - 1), 4),
         benchmark_return=round(float((1 + curve["benchmark"]).prod() - 1), 4),
-        best_iteration=int(model.best_iteration),
+        best_iteration=int(rounds),
     )
     return m, curve
 
@@ -93,6 +102,7 @@ def summarize(eq: pd.DataFrame) -> dict:
     rest = x[pd.DatetimeIndex(x.index).year != best]
     mean = float(x.mean()) if len(x) else None
     mean_ex = float(rest.mean()) if len(rest) else None
+    ew = eq["net_excess_ew"].dropna() if "net_excess_ew" in eq.columns else pd.Series(dtype=float)
     lo = None
     if len(x) >= 2:
         lo = float(x.mean() - t_dist.ppf(0.975, len(x) - 1) * x.std(ddof=1) / np.sqrt(len(x)))
@@ -103,6 +113,8 @@ def summarize(eq: pd.DataFrame) -> dict:
         period_hit_rate=round(float((x > 0).mean()), 4) if len(x) else None,
         best_year=best,
         net_excess_ex_best_year=round(mean_ex, 5) if mean_ex is not None else None,
+        # 參考用（不影響門檻）：基準換成股票池等權平均，看純選股有沒有用
+        net_excess_ew_per_period=round(float(ew.mean()), 5) if len(ew) else None,
         positive_years=int((by_year > 0).sum()),
         n_years=int(len(by_year)),
         net_cost=C.NET_COST,
@@ -115,24 +127,29 @@ def main():
     ds = add_labels(feat, idx)
     ds = ds.dropna(subset=FEATURE_COLS, how="all")
     ds = ds[ds["excess"].notna()]
-    keep = sample_dates(ds["date"])
-    ds = ds[ds["date"].isin(keep)].reset_index(drop=True)
+    ds = ds.reset_index(drop=True)
     ds["year"] = ds["date"].dt.year
-    print(f"[train] 樣本 {len(ds)} 列（已抽樣），{ds['date'].min().date()} ~ {ds['date'].max().date()}")
+    all_dates = np.sort(ds["date"].unique())
+    test_dates = sample_dates(ds["date"])          # 測試：不重疊的決策日
+    train_dates = all_dates[:: max(C.TRAIN_EVERY, 1)]  # 訓練：預設每天
+    in_test = ds["date"].isin(test_dates)
+    in_train = ds["date"].isin(train_dates) & ds["label"].notna()
+    print(f"[train] 樣本 {len(ds)} 列，可訓練 {int(in_train.sum())} 列、測試決策日 {len(test_dates)} 個，"
+          f"{ds['date'].min().date()} ~ {ds['date'].max().date()}")
 
     years = [y for y in sorted(ds["year"].unique()) if y >= C.FIRST_TEST_YEAR]
     rows, curves = [], []
     for y in years:
-        test = ds[ds["year"] == y]
+        test = ds[(ds["year"] == y) & in_test]
         if test.empty:
             continue
         # 隔離：標籤必須在測試期第一個決策日之前就結算，否則等於偷看測試期股價
-        train = ds[(ds["exit_date"] < test["date"].min()) & ds["label"].notna()]
+        train = ds[(ds["exit_date"] < test["date"].min()) & in_train]
         if len(train) < 2000 or len(test) < 50:
             print(f"  {y}: 資料不足，跳過")
             continue
-        model = fit(train)
-        m, curve = evaluate(model, test)
+        model, rounds = fit(train)
+        m, curve = evaluate(model, rounds, test)
         m["year"] = y
         m["n_train"] = len(train)
         rows.append(m)
@@ -149,6 +166,8 @@ def main():
         f.write("# Walk-forward 回測報告\n\n")
         f.write(f"產生時間：{dt.datetime.now():%Y-%m-%d %H:%M}\n\n")
         f.write(f"欄位說明：prec_* = 超額報酬 > 0 的比例；avg_ret_signal_net 已扣來回成本與滑價 {C.NET_COST:.1%}；"
+                "*_ew = 基準換成股票池等權平均（看純選股，僅供參考，門檻仍看加權指數）；"
+                "股價已還原除權息，加權指數為不含息的價格指數；"
                 "進場價為隔日開盤；strategy_return 只在大盤濾網開啟時進場。"
                 "股票池固定，倖存者偏差尚未修正，結果仍可能偏樂觀。\n\n")
         f.write(report.to_markdown())
@@ -163,13 +182,13 @@ def main():
         f.write("\n\n## 回測門檻\n\n```json\n" + json.dumps(summary, ensure_ascii=False, indent=2) + "\n```\n")
 
     # 最終模型：用全部有標籤資料
-    final = fit(ds[ds["label"].notna()])
+    final, final_rounds = fit(ds[in_train])
     final.save_model(str(C.MODEL_DIR / "model_latest.txt"))
     imp = pd.DataFrame({"feature": FEATURE_COLS,
                         "gain": final.feature_importance("gain")}).sort_values("gain", ascending=False)
     imp.to_csv(C.OUT_DIR / "feature_importance.csv", index=False)
     meta = dict(model_version=C.MODEL_VERSION, trained_at=dt.datetime.now().isoformat(timespec="seconds"),
-                trained_until=str(ds["date"].max().date()), best_iteration=int(final.best_iteration),
+                trained_until=str(ds["date"].max().date()), best_iteration=int(final_rounds),
                 features=FEATURE_COLS, horizon=C.HORIZON)
     (C.MODEL_DIR / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
 

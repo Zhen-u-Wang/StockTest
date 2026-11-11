@@ -1,5 +1,6 @@
 """
 回填結果：預測隔日開盤進場、第 HORIZON 個交易日收盤出場，算實際報酬、相對大盤超額報酬、是否命中。
+報酬用還原股價計算，持有期間遇到除權息不會被算成虧損。
 然後更新統計。策略開關看「不重疊持有期」，因為同一期的股票會一起漲跌，不能當成獨立樣本。
 
 命中定義：
@@ -15,6 +16,7 @@ from scipy.stats import beta, t as t_dist
 from . import config as C
 from . import supabase_io as sb
 from .predict import LOG_FILE, STATS_FILE, PRED_COLS
+from .adjust import adjust_prices
 
 BUY_SET = {"買進", "強烈買進"}
 
@@ -23,6 +25,8 @@ def _price_index():
     price = pd.read_parquet(C.DATA_DIR / "price.parquet")
     price["date"] = pd.to_datetime(price["date"])
     price["stock_id"] = price["stock_id"].astype(str)
+    dpath = C.DATA_DIR / "dividend.parquet"
+    price = adjust_prices(price, pd.read_parquet(dpath) if dpath.exists() else pd.DataFrame())
     ipath = C.DATA_DIR / "index_features.parquet"
     if not ipath.exists():
         from .features import build
