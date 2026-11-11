@@ -1,8 +1,8 @@
 {
-  "model_version": "lgb-v2",
-  "trained_at": "2026-11-06T10:40:02",
-  "trained_until": "2026-10-29",
-  "best_iteration": 89,
+  "model_version": "lgb-v3",
+  "trained_at": "2026-11-11T02:08:11",
+  "trained_until": "2026-11-03",
+  "best_iteration": 78,
   "features": [
     "ret_5_rk",
     "ret_20_rk",
@@ -24,11 +24,7 @@
     "margin_chg_5_rk",
     "short_chg_5_rk",
     "rev_yoy_rk",
-    "rev_mom_rk",
-    "idx_ret_5",
-    "idx_ret_20",
-    "idx_vol_20",
-    "idx_dist_ma60"
+    "rev_mom_rk"
   ],
   "horizon": 5
 }
