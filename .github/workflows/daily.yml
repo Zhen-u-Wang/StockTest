@@ -51,8 +51,20 @@ jobs:
       - name: 抓資料
         run: python -m pipeline.fetch
 
-      - name: 訓練模型（手動勾選 retrain、每月 1 日、或尚無模型時）
-        if: ${{ inputs.retrain || github.event.schedule == '0 10 1 * *' || hashFiles('models/model_latest.txt') == '' }}
+      # 程式裡的模型版本（config.MODEL_VERSION）跟已存模型不同，代表特徵或訓練方式改過，要重訓
+      - name: 檢查模型版本
+        id: ver
+        run: |
+          python - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          from pipeline import config as C
+          p = C.MODEL_DIR / "meta.json"
+          saved = json.loads(p.read_text()).get("model_version") if p.exists() else None
+          print("stale=" + str(saved != C.MODEL_VERSION).lower())
+          EOF
+
+      - name: 訓練模型（手動勾選 retrain、每月 1 日、尚無模型、或模型版本過期時）
+        if: ${{ inputs.retrain || github.event.schedule == '0 10 1 * *' || hashFiles('models/model_latest.txt') == '' || steps.ver.outputs.stale == 'true' }}
         run: python -m pipeline.train
 
       - name: 產生建議
