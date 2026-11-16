@@ -1,6 +1,6 @@
 {
   "id": 1,
-  "updated_at": "2026-11-13T18:23:29",
+  "updated_at": "2026-11-16T20:51:00",
   "n_pending": 60,
   "enabled": false,
   "gate_min_n": 30,
@@ -22,8 +22,8 @@
   "ci_upper": null,
   "avg_excess": null,
   "avg_return": null,
-  "all_n": 21,
-  "all_hit_rate": 0.7619,
-  "strong_n": 13,
-  "strong_hit_rate": 0.7692
+  "all_n": 31,
+  "all_hit_rate": 0.5484,
+  "strong_n": 23,
+  "strong_hit_rate": 0.4783
 }
