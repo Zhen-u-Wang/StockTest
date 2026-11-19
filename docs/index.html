@@ -63,6 +63,7 @@
            border: 1px solid currentColor; }
   .b-strong { color: var(--up); }  .b-buy { color: var(--up-soft); }  .b-wait { color: var(--flat); }
   .hit { color: var(--good); }  .miss { color: var(--up); }
+  .skip { color: var(--muted); }  .skip small { font-size: 11px; }
   .pos { color: var(--up); }  .neg { color: var(--good); }   /* 台股慣例：紅漲綠跌 */
   .tbl-wrap { overflow-x: auto; }
   #chart { width: 100%; height: 280px; }
@@ -100,9 +101,9 @@
   </section>
 
   <section>
-    <h2><span>歷史紀錄</span> <small>最近 60 筆已結算訊號</small></h2>
+    <h2><span>歷史紀錄</span> <small>最近 60 筆已結算訊號 · 「當日建議」為當天看板實際顯示的建議（已套用大盤濾網），未出手的訊號不計入績效</small></h2>
     <div class="tbl-wrap"><table id="history"><thead><tr>
-      <th class="l">預測日</th><th class="l">股票</th><th>分數</th><th>建議</th><th>濾網</th><th>實際報酬</th><th>超額報酬</th><th>結果</th>
+      <th class="l">預測日</th><th class="l">股票</th><th>分數</th><th>模型訊號</th><th>濾網</th><th>當日建議</th><th>實際報酬</th><th>超額報酬</th><th>結果</th>
     </tr></thead><tbody></tbody></table></div>
   </section>
 
@@ -237,16 +238,24 @@ function renderToday(rows) {
 
 function renderHistory(rows) {
   const tb = $("#history tbody");
-  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">尚無已結算訊號</td></tr>`; return; }
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="9" class="empty">尚無已結算訊號</td></tr>`; return; }
+  const isBuy = (s) => !!s && (s.startsWith("買進") || s.startsWith("強烈"));
+  const result = (r) => {
+    if (r.hit == null) return `<td>待結算</td>`;
+    // 當天實際建議不是買進（例如被大盤濾網擋下）→ 沒有出手，不算命中/未中，只附註模型本身對錯
+    if (!isBuy(r.signal)) return `<td class="skip">未出手 <small>(模型${r.hit ? "✓" : "✗"})</small></td>`;
+    return `<td class="${r.hit ? "hit" : "miss"}">${r.hit ? "✓ 命中" : "✗ 未中"}</td>`;
+  };
   tb.innerHTML = rows.map((r) => `<tr>
     <td class="l num">${r.pred_date}</td>
     <td class="l">${r.stock_id} ${r.stock_name ?? ""}</td>
     <td class="num">${r.score?.toFixed(3)}</td>
     <td>${badge(r.raw_signal)}</td>
     <td>${r.market_on ? "開" : "關"}</td>
+    <td>${badge(r.signal ?? r.raw_signal)}</td>
     <td class="num ${cls(r.actual_return)}">${signedPct(r.actual_return)}</td>
     <td class="num ${cls(r.excess_return)}">${signedPct(r.excess_return)}</td>
-    <td class="${r.hit == null ? "" : r.hit ? "hit" : "miss"}">${r.hit == null ? "待結算" : r.hit ? "✓ 命中" : "✗ 未中"}</td></tr>`).join("");
+    ${result(r)}</tr>`).join("");
 }
 
 function renderSnapshot(rows) {
